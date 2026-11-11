@@ -48,6 +48,9 @@ public struct AxisMotionState
     /// </summary>
     public AxisStatus StopReason { get; set; }
 
+    /// <summary>Raw historical AXIS_STOPREASON code; not an AXISSTATUS bitmask.</summary>
+    public int StopReasonCode { get; set; }
+
     /// <summary>
     /// 是否运行
     /// </summary>

@@ -61,7 +61,7 @@
             _maxCounts[SignalType.NegativeLimit] = maxAxisCount;
 
             // 初始化反转信号集合
-            foreach (SignalType signalType in Enum.GetValues<SignalType>())
+            foreach (SignalType signalType in Enum.GetValues(typeof(SignalType)))
             {
                 _invertedSignals[signalType] = new HashSet<int>();
             }

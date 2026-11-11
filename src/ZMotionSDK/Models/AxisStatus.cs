@@ -93,6 +93,15 @@ public struct AxisStatus
     /// </summary>
     public bool IsCancelled { get; set; }
 
+    /// <summary>Servo/communication/power faults (not normal homing or limits).</summary>
+    public bool HasFault => Alarm_FollowOverLimit || Error_Communication || Alarm_Axis ||
+        Error_FollowOverLimit || Error_Power || AxisSpeedProtection ||
+        Error_SpecialCommand || Alarm_Input;
+
+    /// <summary>Conditions which must not be reported as a successful move.</summary>
+    public bool HasMotionFailure => HasFault || Limit_Forward || Limit_Backward ||
+        Limit_Forward_Soft || Limit_Backward_Soft || IsCancelled || IsPause;
+
 
     public static AxisStatus Parse(int value)
     {

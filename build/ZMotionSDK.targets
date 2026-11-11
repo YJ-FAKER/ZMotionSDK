@@ -1,0 +1,15 @@
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <!-- .NET Framework does not automatically copy NuGet runtimes/native assets. -->
+  <ItemGroup Condition="'$(TargetFrameworkIdentifier)' == '.NETFramework'">
+    <Content Include="$(MSBuildThisFileDirectory)..\runtimes\win-x64\native\zauxdll.dll" Condition="Exists('$(MSBuildThisFileDirectory)..\runtimes\win-x64\native\zauxdll.dll')">
+      <Link>zauxdll.dll</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Visible>false</Visible>
+    </Content>
+    <Content Include="$(MSBuildThisFileDirectory)..\runtimes\win-x64\native\zmotion.dll" Condition="Exists('$(MSBuildThisFileDirectory)..\runtimes\win-x64\native\zmotion.dll')">
+      <Link>zmotion.dll</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Visible>false</Visible>
+    </Content>
+  </ItemGroup>
+</Project>

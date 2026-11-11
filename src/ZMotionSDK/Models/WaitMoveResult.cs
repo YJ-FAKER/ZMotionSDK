@@ -20,6 +20,15 @@ public struct WaitMoveResult
     /// </summary>
     public double ElapsedTime { get; set; }
 
+    /// <summary>Reason a wait failed; cancellation does not stop hardware motion.</summary>
+    public string? FailureReason { get; set; }
+
+    /// <summary>Last observed historical stop code, if available.</summary>
+    public int? StopReasonCode { get; set; }
+
+    /// <summary>Last measured position, if requested.</summary>
+    public float? FinalPosition { get; set; }
+
     public override string ToString()
     {
         return $"Axis: {Axis}, IsSuccess: {IsSuccess}, ElapsedTime: {ElapsedTime}ms";

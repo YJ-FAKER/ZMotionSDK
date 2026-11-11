@@ -1,10 +1,26 @@
 # ZMotionSDK - 专业C#运动控制SDK
 
-[![.NET 8.0](https://img.shields.io/badge/.NET-8.0-blue.svg)](https://dotnet.microsoft.com/download/dotnet/8.0)
-[![版本](https://img.shields.io/badge/版本-1.0.4-green.svg)](https://www.nuget.org/packages/ZMotionSDK)
+[![.NET Standard 2.0 / .NET 8](https://img.shields.io/badge/.NET-netstandard2.0%20%7C%20net8.0-blue.svg)](https://dotnet.microsoft.com/)
+[![版本](https://img.shields.io/badge/版本-2.2.0-green.svg)](https://www.nuget.org/packages/ZMotionSDK)
 [![平台](https://img.shields.io/badge/平台-Windows-lightgrey.svg)](https://www.microsoft.com/windows)
 
-ZMotionSDK是一个专业的C#运动控制器软件开发包，为正运动ZMotion系列运动控制器提供完整的编程接口。该SDK基于.NET 8.0开发，提供高性能、易用的工业级运动控制解决方案。
+ZMotionSDK是一个C#运动控制器软件开发包，托管程序集采用AnyCPU，支持通过 .NET Standard 2.0 在 .NET Framework 4.7.2+ 和现代 .NET 上使用。实际硬件通信依赖Windows x64原生DLL（zauxdll.dll / zmotion.dll）；AnyCPU不表示可在32位进程上调用这些DLL。实际运动前必须验证设备配置和安全联锁。
+
+## Target frameworks / compatibility (v2.2.0)
+
+| Target | Supported APIs | Note |
+| --- | --- | --- |
+| .NET Framework 4.7.2+ | Uses netstandard2.0 core: controller, motion, EtherCAT, direct/batch IO, status | IOSugar unavailable because MessageToolkit 3.0.1 targets net8.0 only |
+| .NET 8 (net8.0) | Core + IOSugar | Uses net8.0 asset |
+| Other runtimes implementing .NET Standard 2.0 | Managed assembly can be referenced | Actual ZMotion hardware access requires matching supported native libraries (currently Windows x64 only) |
+
+Build both targets (`netstandard2.0` and `net8.0`): `dotnet build src/ZMotionSDK/ZMotionSDK.csproj -c Release`. Both managed DLLs are AnyCPU (IL-only).
+Run no-hardware smoke tests: `dotnet run --project tests/ZMotionSDK.SmokeTests -f net8.0 -c Release` or execute the compiled `net472` smoke-test EXE on Windows with .NET Framework 4.7.2+.
+Native binaries are packaged at `runtimes/win-x64/native/`. For manual assembly references, copy both native DLLs next to the consumer executable. For NuGet .NET Framework consumers, the package includes a build target that copies both native DLLs. **Set the host application to x64, or ensure its AnyCPU host process runs 64-bit with Prefer32Bit disabled.** Running as x86 results in native DLL load failure.
+
+**Safety:** Do not mix concurrent motion/IO calls with `Close()` or `Dispose()`; serialize controller access at application level. The connection lock protects connect/disconnect from each other, **not all** native operations. For production, use one controller-owner service per handle. `WaitMoveCompleteAsync` verifies fault/limit conditions and an idle motion queue; pass `targetPosition` to check encoder feedback within `positionTolerance`. Cancellation/timeout stops waiting, **not the physical axis**. The historical `AXIS_STOPREASON` value is exposed as `GetAxisStopReasonCode()`, not an `AXISSTATUS` bitmask. Validate an OP EtherCAT bus, drive status and interlocks before commanding motion.
+
+IOSugar currently provides synchronous read/write APIs. README examples mentioning `ReadDIAsync` or `WriteAsync` describe a future interface and are not callable in v2.2.0.
 
 ## 🌟 核心特性
 
@@ -32,14 +48,14 @@ ZMotionSDK是一个专业的C#运动控制器软件开发包，为正运动ZMoti
 
 ### 🔄 IOSugar（协议糖化）框架
 - 类型安全映射：通过 `[Address]` 等特性将硬件地址映射到结构体/类字段，支持基本类型、枚举、嵌套结构和按位域(BitField)映射。
-- 异步读写：提供 `Read*Async` / `Write*Async` 系列方法，支持批量读写、超时与取消令牌，适合 UI 与高并发场景。
+- 当前实现提供同步读写接口和批量读写；不提供 `Read*Async` / `Write*Async` 方法。UI需要自行安排非阻塞调用和串行化硬件访问。
 - 自定义转换器：字段级支持 `Converter` 特性，用于值缩放、单位转换或自定义序列化/反序列化逻辑。
 - 校验与默认值：支持在字段上声明默认值与校验属性（例如范围验证），读取时会自动应用并在写入前进行校验。
 - 高性能：内部使用反射缓存 + 表达式树动态编译，读写性能接近手写访问，并支持批量打包以减少通信开销。
 - 线程安全与并发：内部使用并发字典和分段锁策略，支持多线程并发读写和共享构建器实例。
 - 虚拟地址与别名：支持将逻辑字段映射到虚拟地址或别名，便于在不同硬件版本间复用协议定义。
 
-说明：README 中示例已改为异步风格，建议在生产代码中使用取消令牌与错误处理，并根据实际硬件协议为字段添加合适的转换器与校验属性。
+说明：运动等待方法可异步等待，但原生硬件IO调用目前是同步接口；应用程序必须自行管理取消、错误处理和硬件访问时序。
 
 ### 🛡️ 安全与异常处理
 - **完善的异常体系**: 专门的ZMotionException异常处理

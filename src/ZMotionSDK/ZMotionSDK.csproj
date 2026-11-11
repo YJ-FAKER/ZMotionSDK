@@ -1,20 +1,22 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
     <PropertyGroup>
-        <TargetFramework>net8.0</TargetFramework>
+        <TargetFrameworks>netstandard2.0;net8.0</TargetFrameworks>
+        <LangVersion>latest</LangVersion>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
         <GeneratePackageOnBuild>True</GeneratePackageOnBuild>
         <PackageId>ZMotionSDK</PackageId>
         <Title>ZMotionSDK</Title>
-        <Version>2.1.1</Version>
+        <Version>2.2.0</Version>
         <Authors>Lejoy</Authors>
         <Description>此包为正运动二次开发包,增加了一些协议的帮助类</Description>
         <PackageIcon>ZMotion.png</PackageIcon>
         <PackageReadmeFile>README.md</PackageReadmeFile>
         <PackageOutputPath>..\..\doc\nuget</PackageOutputPath>
-        <PackageReleaseNotes>init</PackageReleaseNotes>
-        <Platforms>AnyCPU;x64</Platforms>
+        <PackageReleaseNotes>Shared .NET Standard 2.0 core for .NET Framework 4.7.2+ and .NET 8, with .NET 8 IOSugar extensions. AnyCPU managed binaries; Windows x64 native dependency.</PackageReleaseNotes>
+        <Platforms>AnyCPU</Platforms>
+        <PlatformTarget>AnyCPU</PlatformTarget>
         <GenerateDocumentationFile>True</GenerateDocumentationFile>
         <PackageProjectUrl>https://github.com/lejoyke/ZMotionSDK</PackageProjectUrl>
         <RepositoryUrl>https://github.com/lejoyke/ZMotionSDK</RepositoryUrl>
@@ -25,18 +27,20 @@
     </PropertyGroup>
 
     <ItemGroup>
-      <None Update="dll\zauxdll.dll">
-        <CopyToOutputDirectory>Never</CopyToOutputDirectory>
-      </None>
-      <None Update="dll\zmotion.dll">
-        <CopyToOutputDirectory>Never</CopyToOutputDirectory>
-      </None>
+      <None Include="dll\zauxdll.dll" CopyToOutputDirectory="PreserveNewest" Link="zauxdll.dll" Pack="true" PackagePath="runtimes/win-x64/native/" />
+      <None Include="dll\zmotion.dll" CopyToOutputDirectory="PreserveNewest" Link="zmotion.dll" Pack="true" PackagePath="runtimes/win-x64/native/" />
+      <None Include="..\..\build\ZMotionSDK.targets" Pack="true" PackagePath="build/ZMotionSDK.targets;buildTransitive/ZMotionSDK.targets" />
       <None Include="..\..\README.md" Pack="True" PackagePath="\" />
       <None Include="..\..\doc\nuget\ZMotion.png" Pack="True" PackagePath="\" />
     </ItemGroup>
 
     <ItemGroup>
-      <PackageReference Include="MessageToolkit" Version="3.0.1" />
+      <PackageReference Include="MessageToolkit" Version="3.0.1" Condition="'$(TargetFramework)' == 'net8.0'" />
+    </ItemGroup>
+
+    <!-- MessageToolkit 3.0.1 is net8.0-only. .NET Standard 2.0 core supports .NET Framework 4.7.2+. -->
+    <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.0'">
+      <Compile Remove="IOSugar\**\*.cs" />
     </ItemGroup>
 
 </Project>

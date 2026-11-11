@@ -3,19 +3,21 @@ using ZMotionSDK.Helper;
 
 namespace ZMotionSDK;
 
-public partial class ZMotion
+public partial class ZMotion : IDisposable
 {
     private IntPtr _handle;
+    private readonly object _connectionSync = new();
+    private bool _disposed;
 
     #region DIDOHelper
-    private readonly Dictionary<int, int> _signalIndex_Homes = [];
-    private readonly Dictionary<int, int> _signalIndex_ForwardLimits = [];
-    private readonly Dictionary<int, int> _signalIndex_BackwardLimits = [];
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<int, int> _signalIndex_Homes = new();
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<int, int> _signalIndex_ForwardLimits = new();
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<int, int> _signalIndex_BackwardLimits = new();
 
     private DIDOInverterConfig _didoInverterConfig = new();
     #endregion
 
-    public IntPtr Handle => _handle;
+    public IntPtr Handle { get { lock (_connectionSync) return _handle; } }
 
     public EventHandler<string>? OnExecuteError { get; set; }
 
@@ -86,10 +88,15 @@ public partial class ZMotion
     /// <exception cref="ZMotionException"></exception>
     public void Open(string ip, uint timeout)
     {
-        var result = zmcaux.ZAux_FastOpen(2, ip, timeout, out IntPtr handle);
-        CheckResult(result);
-
-        this._handle = handle;
+        if (string.IsNullOrWhiteSpace(ip)) throw new ArgumentException("IP address is required.", nameof(ip));
+        lock (_connectionSync)
+        {
+            EnsureCanOpen();
+            var result = zmcaux.ZAux_FastOpen(2, ip, timeout, out IntPtr handle);
+            CheckResult(result);
+            if (handle == IntPtr.Zero) throw new ZMotionException("The native library returned a null controller handle.");
+            _handle = handle;
+        }
     }
 
     /// <summary>
@@ -99,10 +106,15 @@ public partial class ZMotion
     /// <exception cref="ZMotionException"></exception>
     public void Open_Eth(string ip)
     {
-        var result = zmcaux.ZAux_OpenEth(ip, out IntPtr handle);
-        CheckResult(result);
-
-        _handle = handle;
+        if (string.IsNullOrWhiteSpace(ip)) throw new ArgumentException("IP address is required.", nameof(ip));
+        lock (_connectionSync)
+        {
+            EnsureCanOpen();
+            var result = zmcaux.ZAux_OpenEth(ip, out IntPtr handle);
+            CheckResult(result);
+            if (handle == IntPtr.Zero) throw new ZMotionException("The native library returned a null controller handle.");
+            _handle = handle;
+        }
     }
 
     /// <summary>
@@ -111,8 +123,33 @@ public partial class ZMotion
     /// <exception cref="ZMotionException"></exception>
     public void Close()
     {
-        var result = zmcaux.ZAux_Close(_handle);
-        CheckResult(result);
+        lock (_connectionSync)
+        {
+            if (_handle == IntPtr.Zero) return;
+            var result = zmcaux.ZAux_Close(_handle);
+            CheckResult(result);
+            _handle = IntPtr.Zero;
+            _signalIndex_Homes.Clear();
+            _signalIndex_ForwardLimits.Clear();
+            _signalIndex_BackwardLimits.Clear();
+        }
+    }
+
+    private void EnsureCanOpen()
+    {
+        if (_disposed) throw new ObjectDisposedException(nameof(ZMotion));
+        if (_handle != IntPtr.Zero) throw new InvalidOperationException("Controller is already connected. Call Close before reopening.");
+    }
+
+    public void Dispose()
+    {
+        lock (_connectionSync)
+        {
+            if (_disposed) return;
+            Close();
+            _disposed = true;
+        }
+        GC.SuppressFinalize(this);
     }
 
     /// <summary>
@@ -183,6 +220,7 @@ public partial class ZMotion
     /// <returns>输入状态,按位存储</returns>
     public bool[] GetDI_Multi_Modbus(int startIndex, int endIndex)
     {
+        ValidateIORange(startIndex, endIndex);
         byte[] value = new byte[(endIndex - startIndex) / 8 + 1];
         var result = zmcaux.ZAux_GetModbusIn(_handle, startIndex, endIndex, value);
 
@@ -211,6 +249,7 @@ public partial class ZMotion
     /// <returns>输出状态,按位存储</returns>
     public bool[] GetDO_Multi_Modbus(int startIndex, int endIndex)
     {
+        ValidateIORange(startIndex, endIndex);
         byte[] value = new byte[(endIndex - startIndex) / 8 + 1];
         var result = zmcaux.ZAux_GetModbusOut(_handle, startIndex, endIndex, value);
         CheckResult(result);
@@ -237,6 +276,7 @@ public partial class ZMotion
     /// <returns>输出状态,按位存储</returns>
     public bool[] GetDO_Multi(ushort startIndex, ushort endIndex)
     {
+        ValidateIORange(startIndex, endIndex);
         uint[] value = new uint[(endIndex - startIndex) / 32 + 1];
         var result = zmcaux.ZAux_Direct_GetOutMulti(_handle, startIndex, endIndex, value);
         CheckResult(result);
@@ -263,6 +303,10 @@ public partial class ZMotion
     /// <param name="value">输出状态</param>
     public void SetDO_Multi(ushort startIndex, bool[] value)
     {
+        if (value == null) throw new ArgumentNullException(nameof(value));
+        if (value.Length == 0) throw new ArgumentException("At least one output is required.", nameof(value));
+        if ((long)startIndex + value.Length - 1 > ushort.MaxValue)
+            throw new ArgumentOutOfRangeException(nameof(value), "Output range exceeds the supported address space.");
         bool[] invertValue = new bool[value.Length];
         for (int i = 0; i < invertValue.Length; i++)
         {
@@ -298,6 +342,7 @@ public partial class ZMotion
     /// <returns>输入状态,按位存储</returns>
     public bool[] GetDI_Multi(int startIndex, int endIndex)
     {
+        ValidateIORange(startIndex, endIndex);
         int[] value = new int[(endIndex - startIndex) / 32 + 1];
         var result = zmcaux.ZAux_Direct_GetInMulti(_handle, startIndex, endIndex, value);
         CheckResult(result);
@@ -327,8 +372,7 @@ public partial class ZMotion
         int index = 0;
         var result = zmcaux.ZAux_Direct_GetFwdIn(_handle, axis, ref index);
         CheckResult(result);
-        if (!_signalIndex_ForwardLimits.TryAdd(axis, index))
-            _signalIndex_ForwardLimits[axis] = index;
+        _signalIndex_ForwardLimits[axis] = index;
         return index;
     }
 
@@ -342,8 +386,7 @@ public partial class ZMotion
         int index = 0;
         var result = zmcaux.ZAux_Direct_GetRevIn(_handle, axis, ref index);
         CheckResult(result);
-        if (!_signalIndex_BackwardLimits.TryAdd(axis, index))
-            _signalIndex_BackwardLimits[axis] = index;
+        _signalIndex_BackwardLimits[axis] = index;
         return index;
     }
 
@@ -358,8 +401,7 @@ public partial class ZMotion
         var result = zmcaux.ZAux_Direct_GetDatumIn(_handle, axis, ref signal);
         CheckResult(result);
 
-        if (!_signalIndex_Homes.TryAdd(axis, signal))
-            _signalIndex_Homes[axis] = signal;
+        _signalIndex_Homes[axis] = signal;
         return signal;
     }
 
@@ -398,8 +440,7 @@ public partial class ZMotion
     {
         var result = zmcaux.ZAux_Direct_SetDatumIn(_handle, axis, signalIndex);
         CheckResult(result);
-        if (!_signalIndex_Homes.TryAdd(axis, signalIndex))
-            _signalIndex_Homes[axis] = signalIndex;
+        _signalIndex_Homes[axis] = signalIndex;
     }
 
     /// <summary>
@@ -412,8 +453,7 @@ public partial class ZMotion
     {
         var result = zmcaux.ZAux_Direct_SetFwdIn(_handle, axis, signalIndex);
         CheckResult(result);
-        if (!_signalIndex_ForwardLimits.TryAdd(axis, signalIndex))
-            _signalIndex_ForwardLimits[axis] = signalIndex;
+        _signalIndex_ForwardLimits[axis] = signalIndex;
     }
 
     /// <summary>
@@ -426,8 +466,7 @@ public partial class ZMotion
     {
         var result = zmcaux.ZAux_Direct_SetRevIn(_handle, axis, signalIndex);
         CheckResult(result);
-        if (!_signalIndex_BackwardLimits.TryAdd(axis, signalIndex))
-            _signalIndex_BackwardLimits[axis] = signalIndex;
+        _signalIndex_BackwardLimits[axis] = signalIndex;
     }
 
     /// <summary>
@@ -836,10 +875,18 @@ public partial class ZMotion
     /// <returns>停止原因</returns>
     public AxisStatus GetAxisStopReason(int axis)
     {
+        // Legacy return type retained for binary/source compatibility; do not decode the
+        // stop code as AXISSTATUS flags. Prefer GetAxisStopReasonCode().
+        return new AxisStatus { Value = GetAxisStopReasonCode(axis) };
+    }
+
+    /// <summary>Returns raw historical AXIS_STOPREASON code, not an AXISSTATUS bit field.</summary>
+    public int GetAxisStopReasonCode(int axis)
+    {
         int reason = 0;
         var result = zmcaux.ZAux_Direct_GetAxisStopReason(_handle, axis, ref reason);
         CheckResult(result);
-        return AxisStatus.Parse(reason);
+        return reason;
     }
 
     /// <summary>
@@ -989,10 +1036,16 @@ public partial class ZMotion
         {
             result = zmcaux.ZAux_Direct_GetRsLimit(_handle, axis, ref limit);
         }
-        CheckResult(0);
+        CheckResult(result);
         return limit;
     }
     #endregion
+
+    private static void ValidateIORange(int startIndex, int endIndex)
+    {
+        if (startIndex < 0) throw new ArgumentOutOfRangeException(nameof(startIndex));
+        if (endIndex < startIndex) throw new ArgumentOutOfRangeException(nameof(endIndex));
+    }
 
     public void CheckResult(int result)
     {

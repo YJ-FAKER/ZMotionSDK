@@ -395,43 +395,92 @@ public partial class ZMotion
     /// <param name="timeoutMs">超时时间(毫秒)，默认10秒</param>
     /// <param name="intervalMs">检查间隔时间(毫秒)，默认50毫秒</param>
     /// <param name="exceptionHandler">异常处理器，用于处理运行时异常</param>
+    /// <param name="cancellationToken">Cancels waiting only; does not stop physical motion.</param>
+    /// <param name="targetPosition">Optional encoder position to verify after motion.</param>
+    /// <param name="positionTolerance">Maximum absolute difference from target position.</param>
     /// <returns>运动完成结果</returns>
-    public async Task<WaitMoveResult> WaitMoveCompleteAsync(int axis, int timeoutMs = 10000, int intervalMs = 50, Action<Exception>? exceptionHandler = null)
+    public async Task<WaitMoveResult> WaitMoveCompleteAsync(
+        int axis, int timeoutMs = 10000, int intervalMs = 50,
+        Action<Exception>? exceptionHandler = null, CancellationToken cancellationToken = default,
+        float? targetPosition = null, float positionTolerance = 0.01f)
     {
-        var startTime = DateTime.Now;
-        var result = new WaitMoveResult { Axis = axis, IsSuccess = false, ElapsedTime = 0 };
+        if (timeoutMs <= 0) throw new ArgumentOutOfRangeException(nameof(timeoutMs));
+        if (intervalMs <= 0) throw new ArgumentOutOfRangeException(nameof(intervalMs));
+        if (targetPosition.HasValue && (positionTolerance < 0 || float.IsNaN(positionTolerance)))
+            throw new ArgumentOutOfRangeException(nameof(positionTolerance));
 
-        using var cts = new CancellationTokenSource(timeoutMs);
-
-        while (!cts.Token.IsCancellationRequested)
+        var timer = System.Diagnostics.Stopwatch.StartNew();
+        var waitResult = new WaitMoveResult { Axis = axis };
+        using var timeout = new CancellationTokenSource(timeoutMs);
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(timeout.Token, cancellationToken);
+        try
         {
-            try
+            // AXIS_STOPREASON is historical, compare it against the initial code.
+            var originalStopReason = GetAxisStopReasonCode(axis);
+            int idleSamples = 0;
+            bool observedMotion = false;
+            while (true)
             {
-                var isRunning = GetIsRunning(axis);
-                if (!isRunning)
+                linked.Token.ThrowIfCancellationRequested();
+                var status = GetAxisStatus(axis);
+                if (status.HasMotionFailure)
                 {
-                    result.IsSuccess = true;
-                    result.ElapsedTime = (DateTime.Now - startTime).TotalMilliseconds;
-                    return result;
+                    waitResult.FailureReason = "Axis fault, limit, pause or cancelled motion.";
+                    break;
                 }
-
-                await Task.Delay(intervalMs, cts.Token).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
-            {
-                // 超时处理
-                result.IsSuccess = false;
-                result.ElapsedTime = (DateTime.Now - startTime).TotalMilliseconds;
-                return result;
-            }
-            catch (Exception ex)
-            {
-                // 使用异常处理器而不是直接抛出
-                exceptionHandler?.Invoke(ex);
+                var running = GetIsRunning(axis);
+                var buffered = GetMovesBuffered(axis);
+                if (running || buffered > 0) observedMotion = true;
+                if (!running && buffered <= 0)
+                {
+                    var currentStopReason = GetAxisStopReasonCode(axis);
+                    waitResult.StopReasonCode = currentStopReason;
+                    if (currentStopReason != 0 && currentStopReason != originalStopReason)
+                    {
+                        waitResult.FailureReason = "AXIS_STOPREASON changed during motion.";
+                        break;
+                    }
+                    if (++idleSamples >= 2)
+                    {
+                        if (!observedMotion && !targetPosition.HasValue)
+                        {
+                            waitResult.FailureReason = "Motion was never observed; provide targetPosition to verify an already completed move.";
+                            break;
+                        }
+                        if (targetPosition.HasValue)
+                        {
+                            var actual = GetPosition_M(axis);
+                            waitResult.FinalPosition = actual;
+                            if (Math.Abs(actual - targetPosition.Value) > positionTolerance)
+                            {
+                                waitResult.FailureReason = "Stopped outside target position tolerance.";
+                                break;
+                            }
+                        }
+                        waitResult.IsSuccess = true;
+                        break;
+                    }
+                }
+                else idleSamples = 0;
+                await Task.Delay(intervalMs, linked.Token).ConfigureAwait(false);
             }
         }
-
-        return result;
+        catch (OperationCanceledException)
+        {
+            waitResult.FailureReason = cancellationToken.IsCancellationRequested
+                ? "Wait cancelled; hardware motion may continue."
+                : "Timeout; hardware motion may continue.";
+        }
+        catch (Exception ex)
+        {
+            waitResult.FailureReason = "Unable to verify motion completion: " + ex.Message;
+            exceptionHandler?.Invoke(ex);
+        }
+        finally
+        {
+            waitResult.ElapsedTime = timer.Elapsed.TotalMilliseconds;
+        }
+        return waitResult;
     }
 
     /// <summary>

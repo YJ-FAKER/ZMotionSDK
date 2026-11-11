@@ -78,7 +78,9 @@ public partial class ZMotion
                 MovesBuffered = movesBuffered[i],
 
                 Status = AxisStatus.Parse((int)statuses[i]),
-                StopReason = AxisStatus.Parse((int)stopReasons[i]),
+                // AXIS_STOPREASON is a code, not the bitmask used by AXISSTATUS.
+                StopReason = new AxisStatus { Value = (int)stopReasons[i] },
+                StopReasonCode = (int)stopReasons[i],
                 Encoder = encoders[i],
             };
         }
@@ -95,7 +97,7 @@ public partial class ZMotion
     {
         var axisSignal = new AxisSignal
         {
-            AlarmSignal = GetAxisStatus(axisIndex).Value != 0,
+            AlarmSignal = GetAxisStatus(axisIndex).HasFault,
 
             HomeSignal = GetDI_Home(axisIndex),
             PositiveLimitSignal = GetDI_ForwardLimit(axisIndex),
